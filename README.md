@@ -46,6 +46,32 @@ Compare two Excel files **column-field wise across all rows**, then review a cle
 - Empty/missing rows in the shorter file are reported as differences (e.g. “no row” in the other file).
 - Numeric and text values are normalized for comparison (e.g. spaces trimmed, NaN treated as empty).
 
+## Deploy on Streamlit Community Cloud
+
+Deploy from the **Streamlit Cloud website** (don’t use the “Deploy” button inside the running app).
+
+1. **Push your code to GitHub** (if not already):
+   ```bash
+   cd file-comparison   # or your repo folder
+   git add .
+   git commit -m "Your message"
+   git push -u origin main
+   ```
+
+2. **Open Streamlit Community Cloud:**  
+   Go to [share.streamlit.io](https://share.streamlit.io) and sign in with **GitHub**.
+
+3. **Create a new app:**
+   - Click **“New app”**.
+   - **Repository:** `91225Gov/po_comparison` (or select it from the list).
+   - **Branch:** `main`.
+   - **Main file path:** `app.py`.
+   - Click **“Deploy!”**.
+
+4. Wait for the build to finish. Your app will be available at a URL like `https://po-comparison-xxxx.streamlit.app`.
+
+If you see *“The app’s code is not connected to a remote GitHub repository”*, it usually means you’re using the in-app **Deploy** button. Use the steps above on [share.streamlit.io](https://share.streamlit.io) instead, and select your GitHub repo there.
+
 ## Requirements
 
 - Python 3.9+
