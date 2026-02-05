@@ -1,0 +1,29 @@
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.so
+.eggs/
+*.egg-info/
+*.egg
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Local / test
+*.xlsx
+*.xls
+!requirements.txt
