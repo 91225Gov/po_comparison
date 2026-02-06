@@ -63,20 +63,20 @@ def run_comparison(
     file2_sheets: dict[str, pd.DataFrame],
     sheet1_name: str,
     sheet2_name: str,
-    key_column: str = KEY_COLUMN,
+    key_columns: list[str],
 ) -> ComparisonResult:
     df1 = file1_sheets[sheet1_name]
     df2 = file2_sheets[sheet2_name]
-    return compare_excel_files(df1, df2, sheet1_name, sheet2_name, key_column=key_column)
+    return compare_excel_files(df1, df2, sheet1_name, sheet2_name, key_columns=key_columns)
 
 
 def result_to_dataframe(result: ComparisonResult) -> pd.DataFrame:
     """Convert list of CellDifference to DataFrame for display/export."""
-    key_col = result.key_column or KEY_COLUMN
     rows = [
         {
-            key_col: d.key_value,
-            "Excel Row": d.excel_row,
+            "Key": d.key_value,
+            "Excel Row (File 1)": d.excel_row,
+            "Excel Row (File 2)": d.excel_row_file2 if d.excel_row_file2 is not None else "—",
             "Column": d.column,
             "File 1 Value": d.value_file1,
             "File 2 Value": d.value_file2,
@@ -89,9 +89,18 @@ def result_to_dataframe(result: ComparisonResult) -> pd.DataFrame:
 def main():
     st.markdown('<p class="main-header">📊 Retail Analytics Manager – Excel Comparison</p>', unsafe_allow_html=True)
     st.markdown(
-        '<p class="sub-header">Compare two Excel files by <strong>Purchasing document number</strong>. For each document in File 1, the matching row in File 2 is found and all columns are compared. Upload files, then run verification.</p>',
+        '<p class="sub-header">Compare two Excel files by matching rows on the unique column(s) you specify. Upload files, set the key column(s), then run verification.</p>',
         unsafe_allow_html=True,
     )
+
+    # Unique column(s) for matching rows — at the top so user sets it first
+    key_input = st.text_input(
+        "Unique column(s) for matching rows",
+        value=KEY_COLUMN,
+        placeholder="e.g. Purchasing document number  or  Column1, Column2, Column3",
+        help="Enter one column name, or several separated by commas. Rows are matched when all these columns have the same values in both files.",
+    )
+    key_columns = [c.strip() for c in key_input.split(",") if c.strip()]
 
     col1, col2 = st.columns(2)
 
@@ -127,7 +136,7 @@ def main():
         sheet2_name = st.sidebar.selectbox("Sheet in File 2", sheet_names2, key="sheet2")
 
     st.sidebar.markdown("---")
-    st.sidebar.caption(f"Unique key: **{KEY_COLUMN}**")
+    st.sidebar.caption("Key: **" + (", ".join(key_columns) if key_columns else KEY_COLUMN) + "**")
     execute = st.sidebar.button("▶ Run comparison", type="primary", use_container_width=True)
 
     if execute:
@@ -135,13 +144,15 @@ def main():
             st.warning("Please upload both Excel files before running the comparison.")
         elif not file1_sheets or not file2_sheets:
             st.warning("Could not load one or both files. Check file format.")
+        elif not key_columns:
+            st.warning("Please enter at least one unique column name for matching rows.")
         else:
             with st.spinner("Running verification..."):
                 result = run_comparison(
                     file1_sheets, file2_sheets,
                     sheet1_name or sheet_names1[0],
                     sheet2_name or sheet_names2[0],
-                    key_column=KEY_COLUMN,
+                    key_columns=key_columns,
                 )
 
             if result.error:
@@ -160,7 +171,7 @@ def main():
 
             st.markdown("---")
             st.subheader("Columns used for comparison")
-            st.caption(f"Only these columns are compared for each {KEY_COLUMN}.")
+            st.caption(f"Only these columns are compared for each key ({result.key_column}).")
             if result.columns_compared:
                 st.code(", ".join(result.columns_compared))
             if result.requested_columns_missing_in_file1:
@@ -172,10 +183,10 @@ def main():
             st.subheader("Areas of difference")
 
             if result.keys_only_in_file1:
-                st.markdown(f"**{KEY_COLUMN} only in File 1 (missing in File 2):**")
+                st.markdown(f"**Key(s) only in File 1 (missing in File 2):**")
                 st.code(", ".join(str(k) for k in result.keys_only_in_file1))
             if result.keys_only_in_file2:
-                st.markdown(f"**{KEY_COLUMN} only in File 2 (not in File 1):**")
+                st.markdown(f"**Key(s) only in File 2 (not in File 1):**")
                 st.code(", ".join(str(k) for k in result.keys_only_in_file2))
 
             if result.columns_only_in_file1:
@@ -186,7 +197,7 @@ def main():
                 st.code(", ".join(result.columns_only_in_file2))
 
             if result.differences:
-                st.markdown(f"**Cell-by-cell differences (by {KEY_COLUMN}, row, column, File 1 value, File 2 value):**")
+                st.markdown("**Cell-by-cell differences (Excel row in File 1, Excel row in File 2, column, values):**")
                 diff_df = result_to_dataframe(result)
                 st.dataframe(diff_df, use_container_width=True, height=400)
 
@@ -201,7 +212,7 @@ def main():
                 )
             else:
                 if result.common_columns:
-                    st.info(f"No cell differences found. For every {KEY_COLUMN} in File 1, the matching row in File 2 has the same values in common columns.")
+                    st.info("No cell differences found. For every key in File 1, the matching row in File 2 has the same values in common columns.")
                 else:
                     st.info("No common columns to compare.")
 

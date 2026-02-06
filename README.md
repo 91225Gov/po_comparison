@@ -72,6 +72,26 @@ Deploy from the **Streamlit Cloud website** (don’t use the “Deploy” button
 
 If you see *“The app’s code is not connected to a remote GitHub repository”*, it usually means you’re using the in-app **Deploy** button. Use the steps above on [share.streamlit.io](https://share.streamlit.io) instead, and select your GitHub repo there.
 
+## Updating the deployed app
+
+The live URL runs from your **GitHub repo**. To get your changes on the deployed app:
+
+1. **Make your changes** to the code (e.g. in `app.py` or `excel_compare.py`).
+
+2. **Commit and push to the same branch** the app is deployed from (usually `main`):
+   ```bash
+   cd file-comparison
+   git add .
+   git commit -m "Describe your changes"
+   git push origin main
+   ```
+
+3. **Redeploy:**
+   - **Automatic:** Streamlit Community Cloud often redeploys when it detects a new push on the connected branch. Wait a minute and refresh the app URL.
+   - **Manual:** Go to [share.streamlit.io](https://share.streamlit.io) → open your app → click **"Reboot app"** or **"Manage app"** → **"Reboot"** to pull the latest code and rebuild.
+
+After the rebuild finishes, the deployed URL will serve the updated app. No need to create a new app or change the URL.
+
 ## Requirements
 
 - Python 3.9+
