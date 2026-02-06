@@ -93,6 +93,8 @@ class ComparisonResult:
     columns_compared: list[str] = field(default_factory=list)  # columns actually compared
     requested_columns_missing_in_file1: list[str] = field(default_factory=list)
     requested_columns_missing_in_file2: list[str] = field(default_factory=list)
+    # Crosstab per key: list of {key_value, excel_row_file1, excel_row_file2, rows: [{column, file1, file2, is_difference}]}
+    key_crosstabs: list = field(default_factory=list)
 
     @property
     def match_percentage(self) -> float:
@@ -187,8 +189,9 @@ def compare_excel_files(
     result.columns_only_in_file1 = sorted(cols1 - cols2)
     result.columns_only_in_file2 = sorted(cols2 - cols1)
 
-    # Only compare the requested columns that exist in both files
-    result.columns_compared = [c for c in COMPARE_COLUMNS if c in cols1 and c in cols2]
+    # Only compare the requested columns that exist in both files; order as in File 1
+    requested_in_both = [c for c in COMPARE_COLUMNS if c in cols1 and c in cols2]
+    result.columns_compared = [c for c in df1.columns if c in requested_in_both]
     result.requested_columns_missing_in_file1 = [c for c in COMPARE_COLUMNS if c not in cols1]
     result.requested_columns_missing_in_file2 = [c for c in COMPARE_COLUMNS if c not in cols2]
     compare_columns = result.columns_compared
@@ -214,9 +217,11 @@ def compare_excel_files(
 
         if j is None:
             # Key exists in File 1 but not in File 2: report all common columns as diff (missing in File 2)
+            crosstab_rows = []
             for col in compare_columns:
                 result.cells_compared += 1
                 v1 = df1[col].iloc[i]
+                crosstab_rows.append({"column": col, "file1": v1, "file2": "(missing in File 2)", "is_difference": True})
                 result.differences.append(
                     CellDifference(
                         row_index=i,
@@ -228,16 +233,26 @@ def compare_excel_files(
                         key_value=key_val,
                     )
                 )
+            result.key_crosstabs.append({
+                "key_value": key_val,
+                "excel_row_file1": excel_row_file1,
+                "excel_row_file2": excel_row_file2_val,
+                "rows": crosstab_rows,
+            })
             continue
 
-        # Matched row: compare each common column
+        # Matched row: compare each common column and build crosstab
+        crosstab_rows = []
+        has_diff = False
         for col in compare_columns:
             result.cells_compared += 1
             v1 = df1[col].iloc[i]
             v2 = df2[col].iloc[j]
             n1 = _normalize_value(v1)
             n2 = _normalize_value(v2)
-            if n1 != n2:
+            is_diff = n1 != n2
+            if is_diff:
+                has_diff = True
                 result.differences.append(
                     CellDifference(
                         row_index=i,
@@ -249,6 +264,14 @@ def compare_excel_files(
                         key_value=key_val,
                     )
                 )
+            crosstab_rows.append({"column": col, "file1": v1, "file2": v2, "is_difference": is_diff})
+        if has_diff:
+            result.key_crosstabs.append({
+                "key_value": key_val,
+                "excel_row_file1": excel_row_file1,
+                "excel_row_file2": excel_row_file2_val,
+                "rows": crosstab_rows,
+            })
 
     result.total_differences = len(result.differences)
     return result

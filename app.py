@@ -6,6 +6,10 @@ Upload two Excel files, run verification, and view column-field wise differences
 import streamlit as st
 import pandas as pd
 from io import BytesIO
+import html
+
+from openpyxl import load_workbook
+from openpyxl.styles import PatternFill, Font
 
 from excel_compare import compare_excel_files, ComparisonResult, CellDifference, KEY_COLUMN
 
@@ -70,20 +74,106 @@ def run_comparison(
     return compare_excel_files(df1, df2, sheet1_name, sheet2_name, key_columns=key_columns)
 
 
-def result_to_dataframe(result: ComparisonResult) -> pd.DataFrame:
-    """Convert list of CellDifference to DataFrame for display/export."""
-    rows = [
-        {
-            "Key": d.key_value,
-            "Excel Row (File 1)": d.excel_row,
-            "Excel Row (File 2)": d.excel_row_file2 if d.excel_row_file2 is not None else "—",
-            "Column": d.column,
-            "File 1 Value": d.value_file1,
-            "File 2 Value": d.value_file2,
-        }
-        for d in result.differences
+def _safe_str(val) -> str:
+    """Convert value to string for HTML display."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ""
+    return str(val).strip()
+
+
+def _single_crosstab_to_html(key_crosstabs: list, key_column_label: str, field_columns: list) -> str:
+    """
+    One table: rows = keys (e.g. PO numbers), columns = key + for each field two sub-columns (File 1, File 2)
+    + last column = count of columns that differ. Fields with a difference are highlighted: red background, white font.
+    """
+    lines = [
+        '<table style="border-collapse: collapse; width: 100%; margin-bottom: 1rem;">',
+        "<thead><tr style=\"background: #1e3a5f; color: white;\">",
+        f'<th style="border: 1px solid #ddd; padding: 8px; text-align: left;">{html.escape(key_column_label)}</th>',
     ]
+    for col in field_columns:
+        col_esc = html.escape(col)
+        lines.append(f'<th style="border: 1px solid #ddd; padding: 8px; text-align: center;" colspan="2">{col_esc}</th>')
+    lines.append(f'<th style="border: 1px solid #ddd; padding: 8px; text-align: center;">No. of columns differing</th>')
+    lines.append("</tr><tr style=\"background: #2c5282; color: white;\">")
+    lines.append('<th style="border: 1px solid #ddd; padding: 6px;"></th>')
+    for _ in field_columns:
+        lines.append('<th style="border: 1px solid #ddd; padding: 6px; text-align: center;">File 1</th>')
+        lines.append('<th style="border: 1px solid #ddd; padding: 6px; text-align: center;">File 2</th>')
+    lines.append('<th style="border: 1px solid #ddd; padding: 6px;"></th>')
+    lines.append("</tr></thead><tbody>")
+
+    for tab in key_crosstabs:
+        key_esc = html.escape(_safe_str(tab["key_value"]))
+        by_col = {r["column"]: r for r in tab["rows"]}
+        diff_count = sum(1 for r in tab["rows"] if r.get("is_difference", False))
+        lines.append("<tr>")
+        lines.append(f'<td style="border: 1px solid #ddd; padding: 8px; font-weight: 600;">{key_esc}</td>')
+        for col in field_columns:
+            r = by_col.get(col, {})
+            f1 = html.escape(_safe_str(r.get("file1", "")))
+            f2 = html.escape(_safe_str(r.get("file2", "")))
+            is_diff = r.get("is_difference", False)
+            style = 'border: 1px solid #ddd; padding: 8px; background-color: #c0392b; color: white;' if is_diff else 'border: 1px solid #ddd; padding: 8px;'
+            lines.append(f'<td style="{style}">{f1}</td>')
+            lines.append(f'<td style="{style}">{f2}</td>')
+        lines.append(f'<td style="border: 1px solid #ddd; padding: 8px; font-weight: 600; text-align: center;">{diff_count}</td>')
+        lines.append("</tr>")
+    lines.append("</tbody></table>")
+    return "\n".join(lines)
+
+
+def _crosstab_to_dataframe(key_crosstabs: list, key_column_label: str, field_columns: list) -> pd.DataFrame:
+    """Build DataFrame from crosstab (one row per key, sub-columns File 1/File 2 per field, last col = variance count)."""
+    rows = []
+    for tab in key_crosstabs:
+        by_col = {r["column"]: r for r in tab["rows"]}
+        diff_count = sum(1 for r in tab["rows"] if r.get("is_difference", False))
+        row = {key_column_label: tab["key_value"]}
+        for col in field_columns:
+            r = by_col.get(col, {})
+            row[f"{col} (File 1)"] = _safe_str(r.get("file1", ""))
+            row[f"{col} (File 2)"] = _safe_str(r.get("file2", ""))
+        row["No. of columns differing"] = diff_count
+        rows.append(row)
     return pd.DataFrame(rows)
+
+
+# Red background and white font for difference cells in Excel
+_EXCEL_DIFF_FILL = PatternFill(start_color="C0392B", end_color="C0392B", fill_type="solid")
+_EXCEL_DIFF_FONT = Font(color="FFFFFF", bold=False)
+
+
+def _write_crosstab_excel_with_formatting(
+    key_crosstabs: list,
+    key_column_label: str,
+    field_columns: list,
+) -> BytesIO:
+    """Write crosstab to Excel and apply red background + white font to cells where File 1 != File 2."""
+    crosstab_df = _crosstab_to_dataframe(key_crosstabs, key_column_label, field_columns)
+    buf = BytesIO()
+    crosstab_df.to_excel(buf, index=False, sheet_name="Areas of difference")
+    buf.seek(0)
+    wb = load_workbook(buf)
+    ws = wb.active
+    # Data rows: Excel row 2 = first data row (row index 0)
+    for r, tab in enumerate(key_crosstabs):
+        excel_row = r + 2
+        by_col = {row["column"]: row for row in tab["rows"]}
+        for c, col in enumerate(field_columns):
+            cell_info = by_col.get(col, {})
+            if cell_info.get("is_difference", False):
+                # File 1 and File 2 columns for this field (1-based)
+                col_file1 = 2 + c * 2
+                col_file2 = 3 + c * 2
+                for col_idx in (col_file1, col_file2):
+                    cell = ws.cell(row=excel_row, column=col_idx)
+                    cell.fill = _EXCEL_DIFF_FILL
+                    cell.font = _EXCEL_DIFF_FONT
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return out
 
 
 def main():
@@ -182,11 +272,14 @@ def main():
             st.markdown("---")
             st.subheader("Areas of difference")
 
+            key_label = result.key_column or "Unique key"
+            st.caption(f"All **{key_label}** values with differences are listed in a **single table**: one row per key, one column per field. Each cell shows **File 1** and **File 2** values; cells where they differ are **red with white text**.")
+
             if result.keys_only_in_file1:
-                st.markdown(f"**Key(s) only in File 1 (missing in File 2):**")
+                st.markdown(f"**{key_label} only in File 1 (missing in File 2):**")
                 st.code(", ".join(str(k) for k in result.keys_only_in_file1))
             if result.keys_only_in_file2:
-                st.markdown(f"**Key(s) only in File 2 (not in File 1):**")
+                st.markdown(f"**{key_label} only in File 2 (not in File 1):**")
                 st.code(", ".join(str(k) for k in result.keys_only_in_file2))
 
             if result.columns_only_in_file1:
@@ -197,17 +290,26 @@ def main():
                 st.code(", ".join(result.columns_only_in_file2))
 
             if result.differences:
-                st.markdown("**Cell-by-cell differences (Excel row in File 1, Excel row in File 2, column, values):**")
-                diff_df = result_to_dataframe(result)
-                st.dataframe(diff_df, use_container_width=True, height=400)
+                # Single table: all PO numbers as rows, fields as columns; each cell = File 1 & File 2 values; red = variance
+                st.markdown("**All purchase order numbers — fields as crosstab (File 1 / File 2 per column; red = variance):**")
+                st.markdown(
+                    _single_crosstab_to_html(
+                        result.key_crosstabs,
+                        key_label,
+                        result.columns_compared,
+                    ),
+                    unsafe_allow_html=True,
+                )
 
-                buf = BytesIO()
-                diff_df.to_excel(buf, index=False, sheet_name="Differences")
-                buf.seek(0)
+                buf = _write_crosstab_excel_with_formatting(
+                    result.key_crosstabs,
+                    key_label,
+                    result.columns_compared,
+                )
                 st.download_button(
-                    "Download differences as Excel",
+                    "Download Areas of difference as Excel",
                     data=buf,
-                    file_name="excel_comparison_differences.xlsx",
+                    file_name="excel_comparison_areas_of_difference.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
             else:
