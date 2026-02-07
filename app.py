@@ -183,18 +183,9 @@ def _write_crosstab_excel_with_formatting(
 def main():
     st.markdown('<p class="main-header">📊 Retail Analytics Manager – Excel Comparison</p>', unsafe_allow_html=True)
     st.markdown(
-        '<p class="sub-header">Compare two Excel files by matching rows on the unique column(s) you specify. Upload files, set the key column(s), then run verification.</p>',
+        '<p class="sub-header">Compare two Excel files by matching rows on the unique column(s) you choose in the left pane. Upload files, select key column(s), then run verification.</p>',
         unsafe_allow_html=True,
     )
-
-    # Unique column(s) for matching rows — at the top so user sets it first
-    key_input = st.text_input(
-        "Unique column(s) for matching rows",
-        value=KEY_COLUMN,
-        placeholder="e.g. Purchasing document number  or  Column1, Column2, Column3",
-        help="Enter one column name, or several separated by commas. Rows are matched when all these columns have the same values in both files.",
-    )
-    key_columns = [c.strip() for c in key_input.split(",") if c.strip()]
 
     col1, col2 = st.columns(2)
 
@@ -229,8 +220,32 @@ def main():
     if file2_sheets and sheet_names2:
         sheet2_name = st.sidebar.selectbox("Sheet in File 2", sheet_names2, key="sheet2")
 
+    # Build list of all fields from selected sheet(s) for unique-key multiselect
+    available_columns = []
+    if file1_sheets and sheet1_name is not None:
+        available_columns = list(file1_sheets[sheet1_name].columns)
+    if file2_sheets and sheet2_name is not None:
+        cols2 = set(file2_sheets[sheet2_name].columns)
+        available_columns = sorted(set(available_columns) | cols2)
+    else:
+        available_columns = sorted(available_columns)
+
     st.sidebar.markdown("---")
-    st.sidebar.caption("Key: **" + (", ".join(key_columns) if key_columns else KEY_COLUMN) + "**")
+    st.sidebar.subheader("Unique column(s) for matching rows")
+    if not available_columns:
+        st.sidebar.caption("Upload File 1 (and optionally File 2) to see the list of fields.")
+        key_columns = []
+    else:
+        default_key = [KEY_COLUMN] if KEY_COLUMN in available_columns else [available_columns[0]]
+        key_columns = st.sidebar.multiselect(
+            "Select one or more fields as the unique key",
+            options=available_columns,
+            default=default_key,
+            help="Rows are matched when all selected columns have the same values in both files.",
+            key="key_columns_multiselect",
+        )
+    st.sidebar.caption("Key: **" + (", ".join(key_columns) if key_columns else "(none selected)") + "**")
+    st.sidebar.markdown("---")
     execute = st.sidebar.button("▶ Run comparison", type="primary", use_container_width=True)
 
     if execute:
@@ -239,7 +254,7 @@ def main():
         elif not file1_sheets or not file2_sheets:
             st.warning("Could not load one or both files. Check file format.")
         elif not key_columns:
-            st.warning("Please enter at least one unique column name for matching rows.")
+            st.warning("Please select at least one unique column in the left pane for matching rows.")
         else:
             with st.spinner("Running verification..."):
                 result = run_comparison(
@@ -281,10 +296,36 @@ def main():
 
             if result.keys_only_in_file1:
                 st.markdown(f"**{key_label} only in File 1 (missing in File 2):**")
+                st.caption(f"{len(result.keys_only_in_file1)} row(s).")
                 st.code(", ".join(str(k) for k in result.keys_only_in_file1))
+                df1 = file1_sheets[sheet1_name or sheet_names1[0]]
+                rows_only_f1 = df1.iloc[result.row_indices_only_in_file1]
+                buf_f1 = BytesIO()
+                rows_only_f1.to_excel(buf_f1, index=False, sheet_name="Rows only in File 1")
+                buf_f1.seek(0)
+                st.download_button(
+                    "Download rows only in File 1 as Excel",
+                    data=buf_f1,
+                    file_name="rows_only_in_file1.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_only_file1",
+                )
             if result.keys_only_in_file2:
                 st.markdown(f"**{key_label} only in File 2 (not in File 1):**")
+                st.caption(f"{len(result.keys_only_in_file2)} row(s).")
                 st.code(", ".join(str(k) for k in result.keys_only_in_file2))
+                df2 = file2_sheets[sheet2_name or sheet_names2[0]]
+                rows_only_f2 = df2.iloc[result.row_indices_only_in_file2]
+                buf_f2 = BytesIO()
+                rows_only_f2.to_excel(buf_f2, index=False, sheet_name="Rows only in File 2")
+                buf_f2.seek(0)
+                st.download_button(
+                    "Download rows only in File 2 as Excel",
+                    data=buf_f2,
+                    file_name="rows_only_in_file2.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_only_file2",
+                )
 
             if result.columns_only_in_file1:
                 st.markdown("**Columns only in File 1:**")

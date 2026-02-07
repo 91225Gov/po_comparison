@@ -95,6 +95,9 @@ class ComparisonResult:
     requested_columns_missing_in_file2: list[str] = field(default_factory=list)
     # Crosstab per key: list of {key_value, excel_row_file1, excel_row_file2, rows: [{column, file1, file2, is_difference}]}
     key_crosstabs: list = field(default_factory=list)
+    # Row indices for download: rows only in File 1 / only in File 2
+    row_indices_only_in_file1: list = field(default_factory=list)
+    row_indices_only_in_file2: list = field(default_factory=list)
 
     @property
     def match_percentage(self) -> float:
@@ -203,8 +206,12 @@ def compare_excel_files(
         keys_in_file1.add(_row_key(df1, key_columns, i))
 
     keys_in_file2 = set(key_to_row2.keys())
-    result.keys_only_in_file1 = sorted(str(k) for k in (keys_in_file1 - keys_in_file2))
-    result.keys_only_in_file2 = sorted(str(k) for k in (keys_in_file2 - keys_in_file1))
+    keys_only_in_file1_set = keys_in_file1 - keys_in_file2
+    keys_only_in_file2_set = keys_in_file2 - keys_in_file1
+    result.keys_only_in_file1 = sorted(str(k) for k in keys_only_in_file1_set)
+    result.keys_only_in_file2 = sorted(str(k) for k in keys_only_in_file2_set)
+    result.row_indices_only_in_file1 = [i for i in range(len(df1)) if _row_key(df1, key_columns, i) in keys_only_in_file1_set]
+    result.row_indices_only_in_file2 = [j for j in range(len(df2)) if _row_key(df2, key_columns, j) in keys_only_in_file2_set]
 
     # For each row in File 1, find matching row in File 2 and compare
     for i in range(len(df1)):
